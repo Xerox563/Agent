@@ -245,7 +245,12 @@ async def run_followups(
     db: SupabaseService = Depends(get_supabase_service),
     email_service: EmailService = Depends(get_email_service),
 ):
-    candidates = await db.list_followup_candidates()
+    try:
+        candidates = await db.list_followup_candidates()
+    except Exception:
+        logger.exception('Failed to load followup candidates')
+        return {'reminders_sent': 0, 'finals_sent': 0, 'skipped': 0, 'errors': 1}
+
     now = datetime.now(timezone.utc)
     reminder_cutoff = now - timedelta(hours=payload.reminder_after_hours)
     final_cutoff = now - timedelta(hours=payload.final_after_hours)
@@ -253,46 +258,58 @@ async def run_followups(
     reminders_sent = 0
     finals_sent = 0
     skipped = 0
+    errors = 0
 
     for candidate in candidates:
-        if candidate.get('expected_salary') and candidate.get('notice_period'):
+        try:
+            if candidate.get('expected_salary') and candidate.get('notice_period'):
+                skipped += 1
+                continue
+
+            created_at = candidate.get('created_at')
+            if not created_at:
+                skipped += 1
+                continue
+
+            # created_at may vary in format depending on Supabase/PostgREST serialization
+            created_at_norm = str(created_at).replace('Z', '+00:00')
+            try:
+                created = datetime.fromisoformat(created_at_norm)
+            except ValueError:
+                skipped += 1
+                continue
+
+            followup_stage = candidate.get('followup_stage', 'NONE')
+
+            if created <= final_cutoff and followup_stage != 'FINAL':
+                body = (
+                    'Hi,\n\n'
+                    'Final reminder: please share your expected salary and notice period.\n'
+                    'We will close this application soon.\n\n'
+                    'Best regards,\nRecruitment Team'
+                )
+                await email_service.send_email(candidate['email'], 'Final reminder', body)
+                await db.update_candidate(candidate['id'], {'followup_stage': 'FINAL', 'last_email_sent_at': now.isoformat()})
+                finals_sent += 1
+                continue
+
+            if created <= reminder_cutoff and followup_stage == 'NONE':
+                body = (
+                    'Hi,\n\n'
+                    'Quick reminder to share your expected salary and notice period.\n\n'
+                    'Best regards,\nRecruitment Team'
+                )
+                await email_service.send_email(candidate['email'], 'Reminder: screening details', body)
+                await db.update_candidate(candidate['id'], {'followup_stage': 'REMINDER_1', 'last_email_sent_at': now.isoformat()})
+                reminders_sent += 1
+                continue
+
             skipped += 1
-            continue
+        except Exception:
+            logger.exception('Followup processing failed for candidate', extra={'candidate_id': candidate.get('id')})
+            errors += 1
 
-        created_at = candidate.get('created_at')
-        if not created_at:
-            skipped += 1
-            continue
-
-        created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-        followup_stage = candidate.get('followup_stage', 'NONE')
-
-        if created <= final_cutoff and followup_stage != 'FINAL':
-            body = (
-                'Hi,\n\n'
-                'Final reminder: please share your expected salary and notice period.\n'
-                'We will close this application soon.\n\n'
-                'Best regards,\nRecruitment Team'
-            )
-            await email_service.send_email(candidate['email'], 'Final reminder', body)
-            await db.update_candidate(candidate['id'], {'followup_stage': 'FINAL', 'last_email_sent_at': now.isoformat()})
-            finals_sent += 1
-            continue
-
-        if created <= reminder_cutoff and followup_stage == 'NONE':
-            body = (
-                'Hi,\n\n'
-                'Quick reminder to share your expected salary and notice period.\n\n'
-                'Best regards,\nRecruitment Team'
-            )
-            await email_service.send_email(candidate['email'], 'Reminder: screening details', body)
-            await db.update_candidate(candidate['id'], {'followup_stage': 'REMINDER_1', 'last_email_sent_at': now.isoformat()})
-            reminders_sent += 1
-            continue
-
-        skipped += 1
-
-    return {'reminders_sent': reminders_sent, 'finals_sent': finals_sent, 'skipped': skipped}
+    return {'reminders_sent': reminders_sent, 'finals_sent': finals_sent, 'skipped': skipped, 'errors': errors}
 
 
 @router.get('/candidates')
