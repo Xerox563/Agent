@@ -59,6 +59,24 @@
     {
       "parameters": {
         "method": "POST",
+        "url": "http://localhost:8000/replies/run",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"max_results\": 10 }",
+        "options": {}
+      },
+      "id": "node-replies",
+      "name": "Run Replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -150,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
         "url": "http://localhost:8000/followups/run",
         "sendBody": true,
         "specifyBody": "json",
@@ -99,6 +117,17 @@
       ]
     },
     "Run Full Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Run Replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Replies": {
       "main": [
         [
           {

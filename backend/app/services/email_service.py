@@ -58,6 +58,31 @@ class EmailService:
 
         return parsed
 
+    async def fetch_unread_text_replies(self, max_results: int = 10) -> list[dict]:
+        # Prefer emails without attachments (candidate replies)
+        service = self._service()
+        result = service.users().messages().list(
+            userId=settings.gmail_user_id,
+            q='is:unread -has:attachment',
+            maxResults=max_results,
+        ).execute()
+        messages = result.get('messages', [])
+        parsed = []
+
+        for message_meta in messages:
+            message = service.users().messages().get(userId=settings.gmail_user_id, id=message_meta['id']).execute()
+            headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+            body = self._extract_body(message.get('payload', {}))
+            parsed.append(
+                {
+                    'gmail_message_id': message['id'],
+                    'email': self._extract_email(headers.get('From', '')),
+                    'subject': headers.get('Subject', ''),
+                    'body': body,
+                }
+            )
+        return parsed
+
     async def mark_as_read(self, gmail_message_id: str) -> None:
         if not gmail_message_id:
             return

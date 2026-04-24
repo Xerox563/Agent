@@ -75,3 +75,13 @@ class SupabaseService:
         except Exception:
             logger.exception('Failed to list followup candidates from Supabase')
             return []
+
+    async def get_candidate_by_email(self, email: str) -> dict | None:
+        if not email:
+            return None
+        try:
+            response = self.client.table('candidates').select('*').eq('email', email).order('created_at', desc=True).limit(1).execute()
+            return response.data[0] if response.data else None
+        except Exception:
+            logger.exception('Failed to lookup candidate by email')
+            return None

@@ -15,6 +15,7 @@ from app.models import (
     ScheduleInterviewRequest,
     SendEmailRequest,
     SendFollowupsRequest,
+    RepliesRunRequest,
     SendScreeningRequest,
 )
 from app.services.ai_service import AIService
@@ -310,6 +311,53 @@ async def run_followups(
             errors += 1
 
     return {'reminders_sent': reminders_sent, 'finals_sent': finals_sent, 'skipped': skipped, 'errors': errors}
+
+
+@router.post('/replies/run')
+async def run_replies(
+    payload: RepliesRunRequest,
+    email_service: EmailService = Depends(get_email_service),
+    ai_service: AIService = Depends(get_ai_service),
+    db: SupabaseService = Depends(get_supabase_service),
+):
+    replies = await email_service.fetch_unread_text_replies(max_results=payload.max_results)
+    processed = 0
+    matched = 0
+    updated = 0
+    skipped = 0
+    errors = 0
+
+    for reply in replies:
+        processed += 1
+        try:
+            sender = reply.get('email', '')
+            if not sender:
+                skipped += 1
+                await email_service.mark_as_read(reply.get('gmail_message_id', ''))
+                continue
+
+            candidate = await db.get_candidate_by_email(sender)
+            if not candidate:
+                skipped += 1
+                await email_service.mark_as_read(reply.get('gmail_message_id', ''))
+                continue
+
+            matched += 1
+            prompt = (
+                'Extract expected_salary, notice_period, availability_slot from this reply and return JSON only. '
+                f"Reply subject: {reply.get('subject','')}\n\nReply body:\n{reply.get('body','')}"
+            )
+            extracted = await ai_service.json_completion(prompt)
+            result = await db.update_candidate(candidate['id'], extracted)
+            if result:
+                updated += 1
+        except Exception:
+            errors += 1
+            logger.exception('Reply processing failed', extra={'gmail_message_id': reply.get('gmail_message_id')})
+        finally:
+            await email_service.mark_as_read(reply.get('gmail_message_id', ''))
+
+    return {'processed': processed, 'matched': matched, 'updated': updated, 'skipped': skipped, 'errors': errors}
 
 
 @router.get('/candidates')

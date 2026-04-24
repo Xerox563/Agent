@@ -44,6 +44,10 @@ class SendFollowupsRequest(BaseModel):
     final_after_hours: int = Field(default=96, ge=2)
 
 
+class RepliesRunRequest(BaseModel):
+    max_results: int = Field(default=10, ge=1, le=50)
+
+
 class CandidateSummary(BaseModel):
     id: str
     email: str
