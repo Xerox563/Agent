@@ -6,6 +6,10 @@ class IngestEmailRequest(BaseModel):
     max_results: int = Field(default=10, ge=1, le=50)
 
 
+class PipelineRunRequest(BaseModel):
+    max_results: int = Field(default=10, ge=1, le=50)
+
+
 class ParseResumeRequest(BaseModel):
     candidate_id: str
     attachment_path: str

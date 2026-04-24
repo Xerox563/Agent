@@ -9,6 +9,7 @@ from app.models import (
     CandidateClassifyRequest,
     IngestEmailRequest,
     ParseResumeRequest,
+    PipelineRunRequest,
     ProcessReplyRequest,
     ScheduleInterviewRequest,
     SendEmailRequest,
@@ -22,6 +23,51 @@ from app.services.supabase_service import SupabaseService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+@router.post('/pipeline/run')
+async def run_pipeline(
+    payload: PipelineRunRequest,
+    email_service: EmailService = Depends(get_email_service),
+    ai_service: AIService = Depends(get_ai_service),
+    db: SupabaseService = Depends(get_supabase_service),
+):
+    emails = await email_service.fetch_unread(max_results=payload.max_results)
+    created = []
+    classified = []
+    screening_sent = 0
+
+    for email in emails:
+        candidate = {**email, 'id': str(uuid.uuid4())}
+        saved = await db.upsert_candidate(candidate)
+        created.append(saved)
+
+        prompt = (
+            'Classify this candidate. Return JSON only with keys: status, score, summary. '
+            "Allowed status values: QUALIFIED, REJECTED, NEEDS_MORE_INFO. Candidate:\n\n"
+            f'{saved}'
+        )
+        result = await ai_service.json_completion(prompt)
+        updated = await db.update_candidate(saved['id'], result)
+        classified.append(updated)
+
+        if updated.get('status') != 'REJECTED':
+            body = (
+                'Hi,\n\n'
+                'Thanks for your interest. Please share:\n'
+                '- Expected salary\n'
+                '- Notice period\n'
+                '- Availability for interview this week\n\n'
+                'Best regards,\nRecruitment Team'
+            )
+            await email_service.send_email(updated['email'], 'Quick screening questions', body)
+            screening_sent += 1
+
+    return {
+        'ingested': len(created),
+        'classified': len(classified),
+        'screening_sent': screening_sent,
+    }
 
 
 @router.post('/ingest-email')
