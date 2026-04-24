@@ -1,4 +1,5 @@
 import { DashboardView } from '@/components/dashboard/DashboardView'
+import type { Candidate } from '@/lib/api'
 import { fetchCandidates } from '@/lib/api'
 
 export default async function DashboardPage({
@@ -8,7 +9,12 @@ export default async function DashboardPage({
 }) {
   const params = await searchParams
   const status = params.status || 'ALL'
-  const candidates = await fetchCandidates(status)
+  let candidates: Candidate[] = []
+  try {
+    candidates = await fetchCandidates(status)
+  } catch {
+    candidates = []
+  }
 
   return <DashboardView candidates={candidates} status={status} />
 }

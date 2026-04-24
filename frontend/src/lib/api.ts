@@ -19,7 +19,7 @@ export async function fetchCandidates(status?: string): Promise<Candidate[]> {
 
   const response = await fetch(url.toString(), { cache: 'no-store' })
   if (!response.ok) {
-    throw new Error('Failed to fetch candidates')
+    return []
   }
 
   const json = await response.json()
