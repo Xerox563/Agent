@@ -26,6 +26,20 @@ class ProcessReplyRequest(BaseModel):
     reply_body: str
 
 
+class SendScreeningRequest(BaseModel):
+    candidate_id: str
+
+
+class ScheduleInterviewRequest(BaseModel):
+    candidate_id: str
+    time_slots: list[str] = Field(default_factory=list, min_length=2, max_length=3)
+
+
+class SendFollowupsRequest(BaseModel):
+    reminder_after_hours: int = Field(default=48, ge=1)
+    final_after_hours: int = Field(default=96, ge=2)
+
+
 class CandidateSummary(BaseModel):
     id: str
     email: str

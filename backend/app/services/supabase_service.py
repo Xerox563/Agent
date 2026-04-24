@@ -30,3 +30,12 @@ class SupabaseService:
             query = query.eq('status', status)
         response = query.execute()
         return response.data or []
+
+    async def list_followup_candidates(self) -> list[dict]:
+        response = (
+            self.client.table('candidates')
+            .select('*')
+            .in_('status', ['QUALIFIED', 'NEEDS_MORE_INFO', 'NEW'])
+            .execute()
+        )
+        return response.data or []
