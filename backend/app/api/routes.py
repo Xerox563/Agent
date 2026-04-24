@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -30,43 +31,87 @@ async def run_pipeline(
     payload: PipelineRunRequest,
     email_service: EmailService = Depends(get_email_service),
     ai_service: AIService = Depends(get_ai_service),
+    parser: ParserService = Depends(get_parser_service),
     db: SupabaseService = Depends(get_supabase_service),
 ):
     emails = await email_service.fetch_unread(max_results=payload.max_results)
     created = []
     classified = []
     screening_sent = 0
+    resumes_parsed = 0
+    skipped_without_resume = 0
+    resume_dir = os.path.join('/tmp', 'agent_resumes')
+    already_seen = 0
+    errors = 0
 
     for email in emails:
+        existing = await db.get_candidate_by_gmail_message_id(email.get('gmail_message_id', ''))
+        if existing:
+            already_seen += 1
+            await email_service.mark_as_read(email.get('gmail_message_id', ''))
+            continue
+
         candidate = {**email, 'id': str(uuid.uuid4())}
         saved = await db.upsert_candidate(candidate)
+        if not saved:
+            errors += 1
+            continue
         created.append(saved)
 
-        prompt = (
-            'Classify this candidate. Return JSON only with keys: status, score, summary. '
-            "Allowed status values: QUALIFIED, REJECTED, NEEDS_MORE_INFO. Candidate:\n\n"
-            f'{saved}'
-        )
-        result = await ai_service.json_completion(prompt)
-        updated = await db.update_candidate(saved['id'], result)
-        classified.append(updated)
-
-        if updated.get('status') != 'REJECTED':
-            body = (
-                'Hi,\n\n'
-                'Thanks for your interest. Please share:\n'
-                '- Expected salary\n'
-                '- Notice period\n'
-                '- Availability for interview this week\n\n'
-                'Best regards,\nRecruitment Team'
+        try:
+            pdf_paths = await email_service.download_pdf_attachments(
+                gmail_message_id=saved.get('gmail_message_id', ''),
+                attachments=saved.get('attachments', []),
+                target_dir=resume_dir,
             )
-            await email_service.send_email(updated['email'], 'Quick screening questions', body)
-            screening_sent += 1
+
+            if pdf_paths:
+                resume_text = await parser.pdf_to_text(pdf_paths[0])
+                parse_prompt = (
+                    'Extract candidate info and return JSON only with keys: '
+                    'name, experience, role, skills. Resume text:\n\n'
+                    f'{resume_text}'
+                )
+                parsed = await ai_service.json_completion(parse_prompt)
+                saved = await db.update_candidate(saved['id'], parsed)
+                resumes_parsed += 1
+            else:
+                skipped_without_resume += 1
+
+            prompt = (
+                'Classify this candidate. Return JSON only with keys: status, score, summary. '
+                "Allowed status values: QUALIFIED, REJECTED, NEEDS_MORE_INFO. Candidate:\n\n"
+                f'{saved}'
+            )
+            result = await ai_service.json_completion(prompt)
+            updated = await db.update_candidate(saved['id'], result)
+            classified.append(updated)
+
+            if updated.get('status') != 'REJECTED':
+                body = (
+                    'Hi,\n\n'
+                    'Thanks for your interest. Please share:\n'
+                    '- Expected salary\n'
+                    '- Notice period\n'
+                    '- Availability for interview this week\n\n'
+                    'Best regards,\nRecruitment Team'
+                )
+                await email_service.send_email(updated['email'], 'Quick screening questions', body)
+                screening_sent += 1
+        except Exception:
+            logger.exception('Pipeline failed for message', extra={'gmail_message_id': saved.get('gmail_message_id')})
+            errors += 1
+        finally:
+            await email_service.mark_as_read(email.get('gmail_message_id', ''))
 
     return {
         'ingested': len(created),
+        'resumes_parsed': resumes_parsed,
+        'skipped_without_resume': skipped_without_resume,
+        'already_seen': already_seen,
         'classified': len(classified),
         'screening_sent': screening_sent,
+        'errors': errors,
     }
 
 

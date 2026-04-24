@@ -36,6 +36,22 @@ class SupabaseService:
             logger.exception('Failed to get candidate from Supabase')
             return None
 
+    async def get_candidate_by_gmail_message_id(self, gmail_message_id: str) -> dict | None:
+        if not gmail_message_id:
+            return None
+        try:
+            response = (
+                self.client.table('candidates')
+                .select('*')
+                .eq('gmail_message_id', gmail_message_id)
+                .limit(1)
+                .execute()
+            )
+            return response.data[0] if response.data else None
+        except Exception:
+            logger.exception('Failed to lookup candidate by gmail_message_id')
+            return None
+
     async def list_candidates(self, status: str | None = None) -> list[dict]:
         try:
             query = self.client.table('candidates').select('*').order('created_at', desc=True)

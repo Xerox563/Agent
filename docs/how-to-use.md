@@ -33,8 +33,20 @@ Open `http://localhost:3000`.
 
 - Open `/dashboard`
 - Use backend docs at `http://localhost:8000/docs`
-- Trigger `POST /pipeline/run` to ingest + classify + screening
+- Trigger `POST /pipeline/run` to ingest + parse PDF resume + classify + screening
 - Refresh dashboard to see candidates
+
+## 4.1) Fully automatic mode (recommended)
+
+Use n8n to call the backend automatically:
+
+- Import `n8n/workflow.json`
+- Activate it
+- It runs `POST /pipeline/run` every 1 minute and also runs followups
+
+The pipeline:
+- de-dupes by `gmail_message_id`
+- marks processed emails as read
 
 ## 5) Common issues
 

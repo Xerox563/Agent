@@ -2,77 +2,116 @@
   "name": "Recruiting Agent MVP",
   "nodes": [
     {
-      "name": "Email Webhook Trigger",
-      "type": "n8n-nodes-base.webhook",
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "node-cron",
+      "name": "Every 1 Minute",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        -520,
+        -60
+      ]
+    },
+    {
       "parameters": {
         "httpMethod": "POST",
-        "path": "recruiting-new-email"
-      }
+        "path": "recruiting-new-email",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Email Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -520,
+        80
+      ],
+      "webhookId": "recruiting-new-email"
     },
     {
-      "name": "Ingest Email",
-      "type": "n8n-nodes-base.httpRequest",
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:8000/ingest-email",
+        "url": "http://localhost:8000/pipeline/run",
         "sendBody": true,
-        "jsonBody": "{\"max_results\": 10}"
-      }
-    },
-    {
-      "name": "Wait 48h",
-      "type": "n8n-nodes-base.wait",
-      "parameters": {
-        "amount": 48,
-        "unit": "hours"
-      }
-    },
-    {
-      "name": "Classify Candidate",
+        "specifyBody": "json",
+        "jsonBody": "{ \"max_results\": 5 }",
+        "options": {}
+      },
+      "id": "node-ingest",
+      "name": "Run Full Pipeline",
       "type": "n8n-nodes-base.httpRequest",
-      "parameters": {
-        "method": "POST",
-        "url": "http://localhost:8000/classify",
-        "sendBody": true,
-        "jsonBody": "{\"candidate_id\": \"{{$json.id}}\"}"
-      }
+      "typeVersion": 4.2,
+      "position": [
+        -280,
+        80
+      ]
     },
     {
-      "name": "Send Screening Email",
-      "type": "n8n-nodes-base.httpRequest",
-      "parameters": {
-        "method": "POST",
-        "url": "http://localhost:8000/send-screening",
-        "sendBody": true,
-        "jsonBody": "{\"candidate_id\": \"{{$json.id}}\"}"
-      }
-    },
-    {
-      "name": "Run Followups",
-      "type": "n8n-nodes-base.httpRequest",
       "parameters": {
         "method": "POST",
         "url": "http://localhost:8000/followups/run",
         "sendBody": true,
-        "jsonBody": "{\"reminder_after_hours\": 48, \"final_after_hours\": 96}"
-      }
+        "specifyBody": "json",
+        "jsonBody": "{ \"reminder_after_hours\": 48, \"final_after_hours\": 96 }",
+        "options": {}
+      },
+      "id": "node-followups",
+      "name": "Run Followups",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -20,
+        80
+      ]
     }
   ],
   "connections": {
+    "Every 1 Minute": {
+      "main": [
+        [
+          {
+            "node": "Run Full Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Email Webhook Trigger": {
-      "main": [[{ "node": "Ingest Email", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Run Full Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Ingest Email": {
-      "main": [[{ "node": "Wait 48h", "type": "main", "index": 0 }]]
-    },
-    "Wait 48h": {
-      "main": [[{ "node": "Classify Candidate", "type": "main", "index": 0 }]]
-    },
-    "Classify Candidate": {
-      "main": [[{ "node": "Send Screening Email", "type": "main", "index": 0 }]]
-    },
-    "Send Screening Email": {
-      "main": [[{ "node": "Run Followups", "type": "main", "index": 0 }]]
+    "Run Full Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Run Followups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
-  }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {},
+  "versionId": "00000000-0000-4000-8000-000000000001"
 }
