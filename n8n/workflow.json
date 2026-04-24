@@ -36,6 +36,26 @@
         "sendBody": true,
         "jsonBody": "{\"candidate_id\": \"{{$json.id}}\"}"
       }
+    },
+    {
+      "name": "Send Screening Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/send-screening",
+        "sendBody": true,
+        "jsonBody": "{\"candidate_id\": \"{{$json.id}}\"}"
+      }
+    },
+    {
+      "name": "Run Followups",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/followups/run",
+        "sendBody": true,
+        "jsonBody": "{\"reminder_after_hours\": 48, \"final_after_hours\": 96}"
+      }
     }
   ],
   "connections": {
@@ -47,6 +67,12 @@
     },
     "Wait 48h": {
       "main": [[{ "node": "Classify Candidate", "type": "main", "index": 0 }]]
+    },
+    "Classify Candidate": {
+      "main": [[{ "node": "Send Screening Email", "type": "main", "index": 0 }]]
+    },
+    "Send Screening Email": {
+      "main": [[{ "node": "Run Followups", "type": "main", "index": 0 }]]
     }
   }
 }

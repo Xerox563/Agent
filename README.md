@@ -60,8 +60,11 @@ npm run dev
 - `POST /ingest-email`
 - `POST /parse-resume`
 - `POST /classify`
+- `POST /send-screening`
 - `POST /send-email`
 - `POST /process-reply`
+- `POST /schedule-interview`
+- `POST /followups/run`
 - `GET /candidates`
 - `GET /health`
 
