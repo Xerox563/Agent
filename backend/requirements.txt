@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+supabase
+httpx
+python-dotenv
+pydantic-settings
+google-api-python-client
+google-auth
+google-auth-oauthlib
+pypdf
