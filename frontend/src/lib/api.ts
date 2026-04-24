@@ -5,6 +5,8 @@ export type Candidate = {
   status?: 'NEW' | 'QUALIFIED' | 'REJECTED' | 'NEEDS_MORE_INFO'
   score?: number
   summary?: string
+  expected_salary?: string
+  notice_period?: string
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
