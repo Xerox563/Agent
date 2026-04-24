@@ -1,5 +1,8 @@
 import base64
+import os
+import re
 from email.mime.text import MIMEText
+from pathlib import Path
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -45,7 +48,7 @@ class EmailService:
             parsed.append(
                 {
                     'gmail_message_id': message['id'],
-                    'email': headers.get('From', ''),
+                    'email': self._extract_email(headers.get('From', '')),
                     'subject': headers.get('Subject', ''),
                     'body': body,
                     'attachments': attachments,
@@ -54,6 +57,41 @@ class EmailService:
             )
 
         return parsed
+
+    async def fetch_unread_text_replies(self, max_results: int = 10) -> list[dict]:
+        # Prefer emails without attachments (candidate replies)
+        service = self._service()
+        result = service.users().messages().list(
+            userId=settings.gmail_user_id,
+            q='is:unread -has:attachment',
+            maxResults=max_results,
+        ).execute()
+        messages = result.get('messages', [])
+        parsed = []
+
+        for message_meta in messages:
+            message = service.users().messages().get(userId=settings.gmail_user_id, id=message_meta['id']).execute()
+            headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+            body = self._extract_body(message.get('payload', {}))
+            parsed.append(
+                {
+                    'gmail_message_id': message['id'],
+                    'email': self._extract_email(headers.get('From', '')),
+                    'subject': headers.get('Subject', ''),
+                    'body': body,
+                }
+            )
+        return parsed
+
+    async def mark_as_read(self, gmail_message_id: str) -> None:
+        if not gmail_message_id:
+            return
+        service = self._service()
+        service.users().messages().modify(
+            userId=settings.gmail_user_id,
+            id=gmail_message_id,
+            body={'removeLabelIds': ['UNREAD']},
+        ).execute()
 
     async def send_email(self, to: str, subject: str, body: str) -> dict:
         service = self._service()
@@ -84,4 +122,46 @@ class EmailService:
             attachment_id = body.get('attachmentId')
             if filename and attachment_id:
                 attachments.append({'filename': filename, 'attachment_id': attachment_id, 'mimeType': part.get('mimeType', '')})
+            if part.get('parts'):
+                attachments.extend(self._extract_attachments(part))
         return attachments
+
+    async def download_pdf_attachments(self, gmail_message_id: str, attachments: list[dict], target_dir: str) -> list[str]:
+        service = self._service()
+        output_paths: list[str] = []
+        Path(target_dir).mkdir(parents=True, exist_ok=True)
+
+        for attachment in attachments:
+            filename = attachment.get('filename', '')
+            attachment_id = attachment.get('attachment_id')
+            mime_type = attachment.get('mimeType', '')
+            if not attachment_id:
+                continue
+            if not filename.lower().endswith('.pdf') and mime_type != 'application/pdf':
+                continue
+
+            api_response = (
+                service.users()
+                .messages()
+                .attachments()
+                .get(userId=settings.gmail_user_id, messageId=gmail_message_id, id=attachment_id)
+                .execute()
+            )
+            data = api_response.get('data')
+            if not data:
+                continue
+            pdf_bytes = base64.urlsafe_b64decode(data.encode('utf-8'))
+
+            safe_name = re.sub(r'[^A-Za-z0-9_.-]', '_', filename or f'{attachment_id}.pdf')
+            file_path = os.path.join(target_dir, safe_name)
+            with open(file_path, 'wb') as file_obj:
+                file_obj.write(pdf_bytes)
+            output_paths.append(file_path)
+
+        return output_paths
+
+    def _extract_email(self, from_header: str) -> str:
+        match = re.search(r'<([^>]+)>', from_header)
+        if match:
+            return match.group(1).strip()
+        return from_header.strip()

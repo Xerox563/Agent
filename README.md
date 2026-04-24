@@ -73,3 +73,4 @@ npm run dev
 - AI prompts enforce JSON-only responses.
 - Supabase is used for candidate storage.
 - Keep this MVP simple and iterative.
+- Quick usage guide: `docs/how-to-use.md`
