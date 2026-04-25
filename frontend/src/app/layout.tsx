@@ -1,15 +1,22 @@
 import './globals.css'
 import type { ReactNode } from 'react'
+import { QueryProvider } from '@/components/providers/QueryProvider'
+import { SmoothScrollProvider } from '@/components/providers/SmoothScrollProvider'
 
 export const metadata = {
-  title: 'Recruiting AI Agent',
-  description: 'AI powered recruiting agent and dashboard',
+  title: 'HireAgent - AI Recruiting Platform',
+  description: 'Premium SaaS ATS and AI recruiting workflow dashboard',
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className="bg-base-200 min-h-screen text-base-content">{children}</body>
+      <body className="min-h-screen bg-slate-950 text-slate-100">
+        <QueryProvider>
+          <SmoothScrollProvider />
+          {children}
+        </QueryProvider>
+      </body>
     </html>
   )
 }

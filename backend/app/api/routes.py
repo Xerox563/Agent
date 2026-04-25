@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.deps import get_ai_service, get_email_service, get_parser_service, get_supabase_service
 from app.models import (
+    CandidateStatusUpdateRequest,
     CandidateClassifyRequest,
     IngestEmailRequest,
     ParseResumeRequest,
@@ -363,3 +364,241 @@ async def run_replies(
 @router.get('/candidates')
 async def list_candidates(status: str | None = Query(default=None), db: SupabaseService = Depends(get_supabase_service)):
     return {'candidates': await db.list_candidates(status=status)}
+
+
+@router.get('/api/candidates')
+async def list_candidates_v2(
+    status: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: SupabaseService = Depends(get_supabase_service),
+):
+    candidates = await db.list_candidates(status=status if status and status != 'ALL' else None)
+    if search:
+        search_term = search.strip().lower()
+        candidates = [
+            row for row in candidates if search_term in str(row.get('name', '')).lower() or search_term in str(row.get('email', '')).lower()
+        ]
+
+    total = len(candidates)
+    start = (page - 1) * page_size
+    paged = candidates[start : start + page_size]
+    return {'items': paged, 'pagination': {'page': page, 'page_size': page_size, 'total': total}}
+
+
+@router.get('/api/candidates/{candidate_id}')
+async def get_candidate_v2(candidate_id: str, db: SupabaseService = Depends(get_supabase_service)):
+    candidate = await db.get_candidate(candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail='Candidate not found')
+    return {'item': candidate}
+
+
+@router.patch('/api/candidates/{candidate_id}/status')
+async def update_candidate_status(
+    candidate_id: str,
+    payload: CandidateStatusUpdateRequest,
+    db: SupabaseService = Depends(get_supabase_service),
+):
+    candidate = await db.get_candidate(candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail='Candidate not found')
+    updated = await db.update_candidate(candidate_id, {'status': payload.status, 'updated_at': datetime.now(timezone.utc).isoformat()})
+    return {'item': updated}
+
+
+@router.get('/api/dashboard/summary')
+async def dashboard_summary(db: SupabaseService = Depends(get_supabase_service)):
+    candidates = await db.list_candidates()
+    total = len(candidates)
+    qualified = len([c for c in candidates if c.get('status') == 'QUALIFIED'])
+    rejected = len([c for c in candidates if c.get('status') == 'REJECTED'])
+    needs_info = len([c for c in candidates if c.get('status') == 'NEEDS_MORE_INFO'])
+    interview_ready = len([c for c in candidates if c.get('status') == 'INTERVIEW_READY'])
+    scored = [int(c.get('score')) for c in candidates if c.get('score') is not None]
+    avg_score = round(sum(scored) / len(scored), 1) if scored else 0
+    jobs = await db.list_table('jobs', limit=200)
+
+    return {
+        'total_candidates': total,
+        'qualified': qualified,
+        'rejected': rejected,
+        'needs_info': needs_info,
+        'interview_ready': interview_ready,
+        'avg_score': avg_score,
+        'open_jobs': len([j for j in jobs if str(j.get('status', 'ACTIVE')).upper() == 'ACTIVE']),
+    }
+
+
+@router.get('/api/dashboard/pipeline')
+async def dashboard_pipeline(db: SupabaseService = Depends(get_supabase_service)):
+    candidates = await db.list_candidates()
+    total = len(candidates)
+    stages = [
+        {'stage': 'Emails Received', 'value': total},
+        {'stage': 'Applications Identified', 'value': len([c for c in candidates if c.get('classification') != 'NON_APPLICATION'])},
+        {'stage': 'Screened', 'value': len([c for c in candidates if c.get('score') is not None])},
+        {'stage': 'Qualified', 'value': len([c for c in candidates if c.get('status') == 'QUALIFIED'])},
+        {'stage': 'Hired', 'value': len([c for c in candidates if c.get('status') == 'HIRED'])},
+    ]
+    return {'stages': stages}
+
+
+@router.get('/api/dashboard/activity')
+async def dashboard_activity(db: SupabaseService = Depends(get_supabase_service)):
+    activities = await db.list_table('activities', limit=20)
+    if activities:
+        return {'items': activities}
+
+    # If activity table is not available yet, fallback to candidate updates from DB.
+    candidates = await db.list_candidates()
+    fallback = [
+        {
+            'id': row.get('id'),
+            'message': f"{row.get('name') or row.get('email', 'Candidate')} marked as {row.get('status', 'NEW')}",
+            'created_at': row.get('updated_at') or row.get('created_at'),
+        }
+        for row in candidates[:10]
+    ]
+    return {'items': fallback}
+
+
+@router.get('/api/dashboard/skills')
+async def dashboard_skills(db: SupabaseService = Depends(get_supabase_service)):
+    candidates = await db.list_candidates()
+    counter: dict[str, int] = {}
+    for row in candidates:
+        skills = row.get('skills') or []
+        if isinstance(skills, str):
+            skills = [s.strip() for s in skills.split(',') if s.strip()]
+        if not isinstance(skills, list):
+            continue
+        for skill in skills:
+            key = str(skill).strip()
+            if not key:
+                continue
+            counter[key] = counter.get(key, 0) + 1
+    top = sorted(counter.items(), key=lambda kv: kv[1], reverse=True)[:8]
+    return {'items': [{'skill': name, 'count': count} for name, count in top]}
+
+
+@router.get('/api/dashboard/trends')
+async def dashboard_trends(db: SupabaseService = Depends(get_supabase_service)):
+    candidates = await db.list_candidates()
+    buckets: dict[str, dict[str, int]] = {}
+    for row in candidates:
+        created_at = str(row.get('created_at') or '')[:10]
+        if not created_at:
+            continue
+        if created_at not in buckets:
+            buckets[created_at] = {'received': 0, 'qualified': 0, 'rejected': 0}
+        buckets[created_at]['received'] += 1
+        status = str(row.get('status') or '').upper()
+        if status == 'QUALIFIED':
+            buckets[created_at]['qualified'] += 1
+        if status == 'REJECTED':
+            buckets[created_at]['rejected'] += 1
+    series = [{'date': date, **values} for date, values in sorted(buckets.items(), key=lambda kv: kv[0])][-30:]
+    return {'items': series}
+
+
+@router.get('/api/dashboard/recent-candidates')
+async def dashboard_recent_candidates(db: SupabaseService = Depends(get_supabase_service)):
+    candidates = await db.list_candidates()
+    return {'items': candidates[:10]}
+
+
+@router.get('/api/emails')
+async def list_emails(db: SupabaseService = Depends(get_supabase_service)):
+    return {'items': await db.list_table('emails', limit=100)}
+
+
+@router.get('/api/emails/{email_id}')
+async def get_email(email_id: str, db: SupabaseService = Depends(get_supabase_service)):
+    item = await db.get_by_id('emails', email_id)
+    if not item:
+        raise HTTPException(status_code=404, detail='Email not found')
+    return {'item': item}
+
+
+@router.post('/api/emails/process')
+async def process_email(payload: dict, db: SupabaseService = Depends(get_supabase_service)):
+    created = await db.insert_row('email_process_logs', {'payload': payload, 'status': 'QUEUED', 'created_at': datetime.now(timezone.utc).isoformat()})
+    return {'item': created}
+
+
+@router.get('/api/analytics')
+async def analytics(db: SupabaseService = Depends(get_supabase_service)):
+    return {'items': await db.list_table('analytics', limit=100)}
+
+
+@router.get('/api/analytics/reports')
+async def analytics_reports(db: SupabaseService = Depends(get_supabase_service)):
+    return {'items': await db.list_table('analytics_reports', limit=100)}
+
+
+@router.get('/api/jobs')
+async def list_jobs(db: SupabaseService = Depends(get_supabase_service)):
+    return {'items': await db.list_table('jobs', limit=200)}
+
+
+@router.post('/api/jobs')
+async def create_job(payload: dict, db: SupabaseService = Depends(get_supabase_service)):
+    created = await db.insert_row('jobs', payload)
+    return {'item': created}
+
+
+@router.patch('/api/jobs/{job_id}')
+async def update_job(job_id: str, payload: dict, db: SupabaseService = Depends(get_supabase_service)):
+    updated = await db.update_by_id('jobs', job_id, payload)
+    return {'item': updated}
+
+
+@router.get('/api/automation')
+async def list_automation(db: SupabaseService = Depends(get_supabase_service)):
+    return {'items': await db.list_table('automation_rules', limit=200)}
+
+
+@router.post('/api/automation')
+async def create_automation(payload: dict, db: SupabaseService = Depends(get_supabase_service)):
+    created = await db.insert_row('automation_rules', payload)
+    return {'item': created}
+
+
+@router.get('/api/templates')
+async def list_templates(db: SupabaseService = Depends(get_supabase_service)):
+    return {'items': await db.list_table('templates', limit=200)}
+
+
+@router.post('/api/templates')
+async def create_template(payload: dict, db: SupabaseService = Depends(get_supabase_service)):
+    created = await db.insert_row('templates', payload)
+    return {'item': created}
+
+
+@router.get('/api/integrations')
+async def list_integrations(db: SupabaseService = Depends(get_supabase_service)):
+    return {'items': await db.list_table('integrations', limit=100)}
+
+
+@router.post('/api/integrations/connect')
+async def connect_integration(payload: dict, db: SupabaseService = Depends(get_supabase_service)):
+    created = await db.insert_row('integration_logs', {'payload': payload, 'status': 'REQUESTED', 'created_at': datetime.now(timezone.utc).isoformat()})
+    return {'item': created}
+
+
+@router.get('/api/settings')
+async def get_settings(db: SupabaseService = Depends(get_supabase_service)):
+    items = await db.list_table('settings', limit=1)
+    return {'item': items[0] if items else {}}
+
+
+@router.patch('/api/settings')
+async def update_settings(payload: dict, db: SupabaseService = Depends(get_supabase_service)):
+    items = await db.list_table('settings', limit=1)
+    if not items:
+        created = await db.insert_row('settings', payload)
+        return {'item': created}
+    updated = await db.update_by_id('settings', items[0].get('id'), payload)
+    return {'item': updated}

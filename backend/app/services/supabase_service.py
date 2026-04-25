@@ -85,3 +85,35 @@ class SupabaseService:
         except Exception:
             logger.exception('Failed to lookup candidate by email')
             return None
+
+    async def list_table(self, table: str, limit: int = 100) -> list[dict]:
+        try:
+            response = self.client.table(table).select('*').limit(limit).execute()
+            return response.data or []
+        except Exception:
+            logger.exception('Failed to list table from Supabase', extra={'table': table})
+            return []
+
+    async def get_by_id(self, table: str, item_id: str) -> dict | None:
+        try:
+            response = self.client.table(table).select('*').eq('id', item_id).limit(1).execute()
+            return response.data[0] if response.data else None
+        except Exception:
+            logger.exception('Failed to get row by id', extra={'table': table, 'id': item_id})
+            return None
+
+    async def update_by_id(self, table: str, item_id: str, payload: dict) -> dict:
+        try:
+            response = self.client.table(table).update(payload).eq('id', item_id).execute()
+            return response.data[0] if response.data else {}
+        except Exception:
+            logger.exception('Failed to update row by id', extra={'table': table, 'id': item_id})
+            return {}
+
+    async def insert_row(self, table: str, payload: dict) -> dict:
+        try:
+            response = self.client.table(table).insert(payload).execute()
+            return response.data[0] if response.data else {}
+        except Exception:
+            logger.exception('Failed to insert row', extra={'table': table})
+            return {}
