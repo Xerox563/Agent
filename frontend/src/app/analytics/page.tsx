@@ -1,5 +1,5 @@
-import { FeaturePage } from '@/components/shared/FeaturePage'
+import { DashboardPage } from '@/components/dashboard/DashboardPage'
 
 export default function AnalyticsPage() {
-  return <FeaturePage title="Analytics" subtitle="Enterprise hiring intelligence and decision-ready reporting." endpoint="/api/analytics" />
+  return <DashboardPage />
 }

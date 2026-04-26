@@ -3,12 +3,12 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { Briefcase, ChartSpline, Gauge, Mail, Puzzle, Settings, Sparkles, UserRoundSearch, Users, Workflow } from 'lucide-react'
+import { Briefcase, ChartSpline, Gauge, Mail, Sparkles, UserRoundSearch, Users } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { navItems } from '@/lib/mock-data'
 
-const iconMap = [Gauge, Users, Mail, ChartSpline, Briefcase, Workflow, Sparkles, Puzzle, Settings]
+const iconMap = [Gauge, Users, Mail, ChartSpline, Briefcase, Sparkles]
 
 export function AppSidebar() {
   const pathname = usePathname()
@@ -53,11 +53,6 @@ export function AppSidebar() {
           )
         })}
       </nav>
-
-      <div className="glass-card mt-4 rounded-2xl p-4">
-        <p className="text-sm font-medium text-slate-100">Sarah Johnson</p>
-        <p className="text-xs text-slate-400">HR Manager</p>
-      </div>
     </aside>
   )
 }

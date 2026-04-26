@@ -3,13 +3,15 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 
 from app.deps import get_ai_service, get_email_service, get_parser_service, get_supabase_service
 from app.models import (
     CandidateStatusUpdateRequest,
     CandidateClassifyRequest,
     IngestEmailRequest,
+    JobMatchRequest,
     ParseResumeRequest,
     PipelineRunRequest,
     ProcessReplyRequest,
@@ -42,7 +44,8 @@ async def run_pipeline(
     screening_sent = 0
     resumes_parsed = 0
     skipped_without_resume = 0
-    resume_dir = os.path.join('/tmp', 'agent_resumes')
+    # Use a project-local directory for resumes instead of /tmp for better Windows compatibility
+    resume_dir = os.path.join(os.getcwd(), 'storage', 'resumes')
     already_seen = 0
     errors = 0
 
@@ -70,11 +73,15 @@ async def run_pipeline(
             if pdf_paths:
                 resume_text = await parser.pdf_to_text(pdf_paths[0])
                 parse_prompt = (
-                    'Extract candidate info and return JSON only with keys: '
-                    'name, experience, role, skills. Resume text:\n\n'
-                    f'{resume_text}'
+                    'Extract candidate information from the resume text and return JSON only with the following keys: '
+                    'name, role, experience, skills (array of strings), description (brief summary), '
+                    'notice_period, links (array of strings for LinkedIn, GitHub, etc.). '
+                    'Ensure the response is valid JSON and does not contain any markdown formatting or HTML.\n\n'
+                    f'Resume text:\n{resume_text}'
                 )
                 parsed = await ai_service.json_completion(parse_prompt)
+                # Store the local resume path in the candidate record
+                parsed['resume_path'] = pdf_paths[0]
                 saved = await db.update_candidate(saved['id'], parsed)
                 resumes_parsed += 1
             else:
@@ -141,9 +148,11 @@ async def parse_resume(
 ):
     text = await parser.pdf_to_text(payload.attachment_path)
     prompt = (
-        'Extract candidate info and return JSON only with keys: '
-        'name, experience, role, skills. Resume text:\n\n'
-        f'{text}'
+        'Extract candidate information from the resume text and return JSON only with the following keys: '
+        'name, role, experience, skills (array of strings), description (brief summary), '
+        'notice_period, links (array of strings for LinkedIn, GitHub, etc.). '
+        'Ensure the response is valid JSON and does not contain any markdown formatting or HTML.\n\n'
+        f'Resume text:\n{text}'
     )
     parsed = await ai_service.json_completion(prompt)
     updated = await db.update_candidate(payload.candidate_id, parsed)
@@ -395,7 +404,20 @@ async def get_candidate_v2(candidate_id: str, db: SupabaseService = Depends(get_
     candidate = await db.get_candidate(candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail='Candidate not found')
-    return {'item': candidate}
+    return candidate
+
+
+@router.get('/api/candidates/{candidate_id}/resume')
+async def download_resume(candidate_id: str, db: SupabaseService = Depends(get_supabase_service)):
+    candidate = await db.get_candidate(candidate_id)
+    if not candidate or not candidate.get('resume_path'):
+        raise HTTPException(status_code=404, detail='Resume not found')
+
+    resume_path = candidate['resume_path']
+    if not os.path.exists(resume_path):
+        raise HTTPException(status_code=404, detail='Resume file not found on disk')
+
+    return FileResponse(resume_path, filename=os.path.basename(resume_path), media_type='application/pdf')
 
 
 @router.patch('/api/candidates/{candidate_id}/status')
@@ -544,6 +566,81 @@ async def analytics_reports(db: SupabaseService = Depends(get_supabase_service))
     return {'items': await db.list_table('analytics_reports', limit=100)}
 
 
+@router.get('/api/dashboard/summary')
+async def get_dashboard_summary(db: SupabaseService = Depends(get_supabase_service)):
+    candidates = await db.list_candidates()
+    total = len(candidates)
+    qualified = len([c for c in candidates if c.get('status') == 'QUALIFIED'])
+    rejected = len([c for c in candidates if c.get('status') == 'REJECTED'])
+    needs_info = len([c for c in candidates if c.get('status') == 'NEEDS_INFO'])
+
+    # Calculate average score if score exists
+    scores = [c.get('score', 0) for c in candidates if c.get('score') is not None]
+    avg_score = round(sum(scores) / len(scores), 1) if scores else 0
+
+    return {
+        'total_candidates': total,
+        'qualified': qualified,
+        'rejected': rejected,
+        'needs_info': needs_info,
+        'avg_score': avg_score,
+    }
+
+
+@router.get('/api/dashboard/pipeline')
+async def get_dashboard_pipeline(db: SupabaseService = Depends(get_supabase_service)):
+    candidates = await db.list_candidates()
+    pipeline = [
+        {'stage': 'Inbox', 'value': len(candidates)},
+        {'stage': 'Screening', 'value': len([c for c in candidates if c.get('status') == 'NEW'])},
+        {'stage': 'Interview', 'value': len([c for c in candidates if c.get('status') == 'INTERVIEW_READY'])},
+        {'stage': 'Qualified', 'value': len([c for c in candidates if c.get('status') == 'QUALIFIED'])},
+    ]
+    return pipeline
+
+
+@router.get('/api/dashboard/trends')
+async def get_dashboard_trends(db: SupabaseService = Depends(get_supabase_service)):
+    # Mock trends for now or aggregate from DB if created_at is available
+    return [
+        {'date': '2024-03-20', 'received': 4, 'qualified': 1, 'rejected': 1},
+        {'date': '2024-03-21', 'received': 7, 'qualified': 2, 'rejected': 2},
+        {'date': '2024-03-22', 'received': 5, 'qualified': 3, 'rejected': 1},
+        {'date': '2024-03-23', 'received': 8, 'qualified': 4, 'rejected': 3},
+        {'date': '2024-03-24', 'received': 12, 'qualified': 6, 'rejected': 4},
+    ]
+
+
+@router.get('/api/dashboard/skills')
+async def get_dashboard_skills(db: SupabaseService = Depends(get_supabase_service)):
+    candidates = await db.list_candidates()
+    skills_map = {}
+    for c in candidates:
+        skills = c.get('skills', [])
+        if isinstance(skills, list):
+            for s in skills:
+                skills_map[s] = skills_map.get(s, 0) + 1
+
+    sorted_skills = sorted(skills_map.items(), key=lambda x: x[1], reverse=True)[:5]
+    return [{'skill': k, 'count': v} for k, v in sorted_skills]
+
+
+@router.get('/api/dashboard/recent-candidates')
+async def get_dashboard_recent(db: SupabaseService = Depends(get_supabase_service)):
+    candidates = await db.list_candidates()
+    return candidates[:10]
+
+
+@router.get('/api/dashboard/activity')
+async def get_dashboard_activity(db: SupabaseService = Depends(get_supabase_service)):
+    # Mock activity for now
+    return [
+        {'id': '1', 'message': 'New application from Sarah Chen', 'created_at': '2024-03-24T10:00:00Z'},
+        {'id': '2', 'message': 'Candidate Mike Ross moved to Interview', 'created_at': '2024-03-24T09:30:00Z'},
+        {'id': '3', 'message': 'Pipeline sync completed', 'created_at': '2024-03-24T08:00:00Z'},
+    ]
+
+
 @router.get('/api/jobs')
 async def list_jobs(db: SupabaseService = Depends(get_supabase_service)):
     return {'items': await db.list_table('jobs', limit=200)}
@@ -559,6 +656,28 @@ async def create_job(payload: dict, db: SupabaseService = Depends(get_supabase_s
 async def update_job(job_id: str, payload: dict, db: SupabaseService = Depends(get_supabase_service)):
     updated = await db.update_by_id('jobs', job_id, payload)
     return {'item': updated}
+
+
+@router.post('/api/jobs/match')
+async def match_job(
+    payload: JobMatchRequest,
+    ai_service: AIService = Depends(get_ai_service),
+    db: SupabaseService = Depends(get_supabase_service),
+):
+    candidate = await db.get_candidate(payload.candidate_id)
+    job = await db.get_by_id('jobs', payload.job_id)
+
+    if not candidate or not job:
+        raise HTTPException(status_code=404, detail='Candidate or Job not found')
+
+    prompt = (
+        'Evaluate if this candidate is a good match for this job description. '
+        'Return JSON only with keys: match_score (0-100), reasoning (brief), missing_skills (array), recommendations (brief).\n\n'
+        f"Job Title: {job.get('title')}\nJob Requirements: {job.get('requirements')}\n\n"
+        f"Candidate Name: {candidate.get('name')}\nCandidate Skills: {candidate.get('skills')}\nCandidate Experience: {candidate.get('experience')}\nCandidate Summary: {candidate.get('description') or candidate.get('summary')}"
+    )
+    result = await ai_service.json_completion(prompt)
+    return {'match': result}
 
 
 @router.get('/api/automation')

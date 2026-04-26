@@ -61,6 +61,11 @@ class AIJsonResult(BaseModel):
     data: dict[str, Any]
 
 
+class JobMatchRequest(BaseModel):
+    candidate_id: str
+    job_id: str
+
+
 class CandidateStatusUpdateRequest(BaseModel):
     status: Literal['NEW', 'QUALIFIED', 'REJECTED', 'NEEDS_INFO', 'INTERVIEW_READY']
 

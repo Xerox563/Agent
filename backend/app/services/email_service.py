@@ -36,6 +36,7 @@ class EmailService:
 
     async def fetch_unread(self, max_results: int = 10) -> list[dict]:
         service = self._service()
+        # Search for unread emails that likely have attachments
         result = service.users().messages().list(userId=settings.gmail_user_id, q='is:unread', maxResults=max_results).execute()
         messages = result.get('messages', [])
         parsed = []
@@ -43,13 +44,28 @@ class EmailService:
         for message_meta in messages:
             message = service.users().messages().get(userId=settings.gmail_user_id, id=message_meta['id']).execute()
             headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+            subject = headers.get('Subject', '')
+
+            # Filter by subject
+            if not (subject.lower().startswith('subject for') or subject.lower().startswith('application for')):
+                continue
+
             body = self._extract_body(message.get('payload', {}))
             attachments = self._extract_attachments(message.get('payload', {}))
+
+            # Filter by attachment (must have at least one resume/pdf)
+            has_resume = any(
+                a.get('filename', '').lower().endswith('.pdf') or a.get('mimeType') == 'application/pdf'
+                for a in attachments
+            )
+            if not has_resume:
+                continue
+
             parsed.append(
                 {
                     'gmail_message_id': message['id'],
                     'email': self._extract_email(headers.get('From', '')),
-                    'subject': headers.get('Subject', ''),
+                    'subject': subject,
                     'body': body,
                     'attachments': attachments,
                     'status': 'NEW',
