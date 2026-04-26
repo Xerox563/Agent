@@ -31,6 +31,8 @@ backend/**/*.pyc
 backend/.pytest_cache/
 backend/.mypy_cache/
 backend/.ruff_cache/
+backend/gmail_credentials.json
+backend/gmail_token.json
 
 # Build / coverage / logs
 coverage/
