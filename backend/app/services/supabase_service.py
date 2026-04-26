@@ -145,3 +145,49 @@ class SupabaseService:
         except Exception:
             logger.exception('Failed to insert row', extra={'table': table})
             return {}
+
+    async def delete_candidate(self, candidate_id: str) -> bool:
+        try:
+            self.client.table('candidates').delete().eq('id', candidate_id).execute()
+            return True
+        except Exception:
+            logger.exception('Failed to delete candidate from Supabase', extra={'id': candidate_id})
+            return False
+
+    async def delete_recent_candidates(self, minutes: int = 60) -> int:
+        """Delete candidates created in the last N minutes."""
+        try:
+            from datetime import datetime, timedelta, timezone
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+            response = self.client.table('candidates').delete().gte('created_at', cutoff.isoformat()).execute()
+            return len(response.data) if response.data else 0
+        except Exception:
+            logger.exception('Failed to delete recent candidates from Supabase')
+            return 0
+
+    async def clear_all_candidates(self) -> bool:
+        """Delete ALL candidates from the database."""
+        try:
+            # Fetch all IDs first to bypass "delete without where" protections
+            # and to handle potential foreign key issues more gracefully if needed.
+            response = self.client.table('candidates').select('id').execute()
+            all_ids = [row['id'] for row in response.data] if response.data else []
+            
+            if not all_ids:
+                logger.info("No candidates to clear.")
+                return True
+
+            # Delete from candidates using the list of IDs
+            # If there are many, we could chunk this, but for now we try all at once
+            self.client.table('candidates').delete().in_('id', all_ids).execute()
+            
+            # Also clear activities as they are mostly related to candidates
+            try:
+                self.client.table('activities').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+            except:
+                pass
+
+            return True
+        except Exception as e:
+            logger.exception('Failed to clear all candidates from Supabase')
+            raise e

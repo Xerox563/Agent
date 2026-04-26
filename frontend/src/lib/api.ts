@@ -69,6 +69,18 @@ export async function updateCandidateStatus(candidateId: string, status: Candida
   return response.data.item
 }
 
+export async function deleteCandidate(candidateId: string): Promise<void> {
+  await apiClient.delete(`/api/candidates/${candidateId}`)
+}
+
+export async function deleteRecentCandidates(minutes: number = 60): Promise<void> {
+  await apiClient.delete('/api/candidates/recent', { params: { minutes } })
+}
+
+export async function clearAllCandidates(): Promise<void> {
+  await apiClient.delete('/api/candidates/all')
+}
+
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   const response = await apiClient.get('/api/dashboard/summary')
   return response.data

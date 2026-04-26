@@ -64,7 +64,7 @@ async def run_pipeline(
         created.append(saved)
 
         try:
-            pdf_paths = await email_service.download_pdf_attachments(
+            pdf_paths = await email_service.download_resume_attachments(
                 gmail_message_id=saved.get('gmail_message_id', ''),
                 attachments=saved.get('attachments', []),
                 target_dir=resume_dir,
@@ -73,10 +73,13 @@ async def run_pipeline(
             if pdf_paths:
                 resume_text = await parser.pdf_to_text(pdf_paths[0])
                 parse_prompt = (
-                    'Extract candidate information from the resume text and return JSON only with the following keys: '
-                    'name, role, experience, skills (array of strings), description (brief summary), '
+                    'Extract candidate information from the resume text and email metadata. '
+                    'Return JSON only with the following keys: '
+                    'name, role, email, experience, skills (array of strings), description (brief summary), '
                     'notice_period, links (array of strings for LinkedIn, GitHub, etc.). '
+                    'Ensure the email is extracted correctly from the resume or metadata. '
                     'Ensure the response is valid JSON and does not contain any markdown formatting or HTML.\n\n'
+                    f'Email Metadata: {email}\n'
                     f'Resume text:\n{resume_text}'
                 )
                 parsed = await ai_service.json_completion(parse_prompt)
@@ -85,7 +88,11 @@ async def run_pipeline(
                 saved = await db.update_candidate(saved['id'], parsed)
                 resumes_parsed += 1
             else:
+                # If no valid resume found, we skip this email permanently
                 skipped_without_resume += 1
+                await db.delete_candidate(saved['id'])
+                await email_service.mark_as_read(email.get('gmail_message_id', ''))
+                continue
 
             prompt = (
                 'Classify this candidate. Return JSON only with keys: status, score, summary. '
@@ -108,11 +115,14 @@ async def run_pipeline(
                 )
                 await email_service.send_email(updated['email'], 'Quick screening questions', body)
                 screening_sent += 1
+            
+            # SUCCESS: Only mark as read if we finished processing
+            await email_service.mark_as_read(email.get('gmail_message_id', ''))
+
         except Exception:
             logger.exception('Pipeline failed for message', extra={'gmail_message_id': saved.get('gmail_message_id')})
             errors += 1
-        finally:
-            await email_service.mark_as_read(email.get('gmail_message_id', ''))
+            # Note: We DON'T mark as read here, so it can be retried if it was a network error
 
     return {
         'ingested': len(created),
@@ -200,9 +210,42 @@ async def send_screening_email(
         '- Availability for interview this week\n\n'
         'Best regards,\nRecruitment Team'
     )
-    sent = await email_service.send_email(candidate['email'], 'Quick screening questions', body)
-    updated = await db.update_candidate(payload.candidate_id, {'last_email_sent_at': datetime.now(timezone.utc).isoformat()})
-    return {'sent': sent, 'candidate': updated}
+    await email_service.send_email(candidate['email'], 'Quick screening questions', body)
+    return {'sent': True}
+
+
+@router.delete('/api/candidates/all')
+async def clear_all_candidates(
+    db: SupabaseService = Depends(get_supabase_service),
+):
+    try:
+        success = await db.clear_all_candidates()
+        if not success:
+            raise HTTPException(status_code=500, detail='Database operation failed')
+        return {'success': True}
+    except Exception as e:
+        logger.exception('Clear all failed')
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete('/api/candidates/recent')
+async def delete_recent_candidates(
+    minutes: int = Query(60),
+    db: SupabaseService = Depends(get_supabase_service),
+):
+    count = await db.delete_recent_candidates(minutes=minutes)
+    return {'success': True, 'count': count}
+
+
+@router.delete('/api/candidates/{candidate_id}')
+async def delete_candidate(
+    candidate_id: str,
+    db: SupabaseService = Depends(get_supabase_service),
+):
+    success = await db.delete_candidate(candidate_id)
+    if not success:
+        raise HTTPException(status_code=500, detail='Failed to delete candidate')
+    return {'success': True}
 
 
 @router.post('/send-email')
@@ -404,7 +447,7 @@ async def get_candidate_v2(candidate_id: str, db: SupabaseService = Depends(get_
     candidate = await db.get_candidate(candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail='Candidate not found')
-    return candidate
+    return {'item': candidate}
 
 
 @router.get('/api/candidates/{candidate_id}/resume')

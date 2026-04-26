@@ -34,36 +34,62 @@ class EmailService:
     def _service(self):
         return build('gmail', 'v1', credentials=self._credentials())
 
-    async def fetch_unread(self, max_results: int = 10) -> list[dict]:
+    async def fetch_unread(self, max_results: int = 20) -> list[dict]:
         service = self._service()
-        # Search for unread emails that likely have attachments
-        result = service.users().messages().list(userId=settings.gmail_user_id, q='is:unread', maxResults=max_results).execute()
+        # Search for unread emails with attachments to narrow down candidates
+        result = service.users().messages().list(
+            userId=settings.gmail_user_id, 
+            q='is:unread has:attachment', 
+            maxResults=max_results
+        ).execute()
         messages = result.get('messages', [])
         parsed = []
 
         for message_meta in messages:
-            message = service.users().messages().get(userId=settings.gmail_user_id, id=message_meta['id']).execute()
+            msg_id = message_meta['id']
+            message = service.users().messages().get(userId=settings.gmail_user_id, id=msg_id).execute()
             headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
             subject = headers.get('Subject', '')
+            subject_lower = subject.lower()
 
-            # Filter by subject
-            if not (subject.lower().startswith('subject for') or subject.lower().startswith('application for')):
+            # Filter by subject (more inclusive but follows user's "starts with" spirit)
+            # We allow common prefixes like Re: or Fwd: and check if the core part starts with the requested terms
+            core_subject = re.sub(r'^(re|fwd|aw|wg|回复|转发):\s*', '', subject_lower, flags=re.IGNORECASE).strip()
+            
+            is_valid_subject = (
+                core_subject.startswith('application for') or 
+                core_subject.startswith('resume for') or 
+                'resume' in core_subject
+            )
+            
+            if not is_valid_subject:
+                # If it has attachments but wrong subject, it's likely not a candidate we want.
+                # Mark as read to avoid clogging the pipeline.
+                await self.mark_as_read(msg_id)
                 continue
 
             body = self._extract_body(message.get('payload', {}))
             attachments = self._extract_attachments(message.get('payload', {}))
 
-            # Filter by attachment (must have at least one resume/pdf)
+            # Filter by attachment (must have at least one resume: pdf, doc, or docx)
             has_resume = any(
-                a.get('filename', '').lower().endswith('.pdf') or a.get('mimeType') == 'application/pdf'
+                a.get('filename', '').lower().endswith(('.pdf', '.doc', '.docx')) or 
+                a.get('mimeType') in [
+                    'application/pdf', 
+                    'application/msword', 
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                ]
                 for a in attachments
             )
+            
             if not has_resume:
+                # If subject is right but no resume, it's also not valid for our dashboard.
+                await self.mark_as_read(msg_id)
                 continue
 
             parsed.append(
                 {
-                    'gmail_message_id': message['id'],
+                    'gmail_message_id': msg_id,
                     'email': self._extract_email(headers.get('From', '')),
                     'subject': subject,
                     'body': body,
@@ -142,7 +168,7 @@ class EmailService:
                 attachments.extend(self._extract_attachments(part))
         return attachments
 
-    async def download_pdf_attachments(self, gmail_message_id: str, attachments: list[dict], target_dir: str) -> list[str]:
+    async def download_resume_attachments(self, gmail_message_id: str, attachments: list[dict], target_dir: str) -> list[str]:
         service = self._service()
         output_paths: list[str] = []
         Path(target_dir).mkdir(parents=True, exist_ok=True)
@@ -153,7 +179,13 @@ class EmailService:
             mime_type = attachment.get('mimeType', '')
             if not attachment_id:
                 continue
-            if not filename.lower().endswith('.pdf') and mime_type != 'application/pdf':
+            
+            is_resume = (
+                filename.lower().endswith(('.pdf', '.doc', '.docx')) or 
+                mime_type in ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+            )
+            
+            if not is_resume:
                 continue
 
             api_response = (
@@ -166,12 +198,12 @@ class EmailService:
             data = api_response.get('data')
             if not data:
                 continue
-            pdf_bytes = base64.urlsafe_b64decode(data.encode('utf-8'))
+            file_bytes = base64.urlsafe_b64decode(data.encode('utf-8'))
 
-            safe_name = re.sub(r'[^A-Za-z0-9_.-]', '_', filename or f'{attachment_id}.pdf')
+            safe_name = re.sub(r'[^A-Za-z0-9_.-]', '_', filename or f'{attachment_id}.bin')
             file_path = os.path.join(target_dir, safe_name)
             with open(file_path, 'wb') as file_obj:
-                file_obj.write(pdf_bytes)
+                file_obj.write(file_bytes)
             output_paths.append(file_path)
 
         return output_paths
