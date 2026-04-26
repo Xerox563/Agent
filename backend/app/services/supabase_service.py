@@ -6,6 +6,16 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def normalize_status(value: str | None) -> str | None:
+    if not value:
+        return value
+    mapping = {
+        'NEEDS_MORE_INFO': 'NEEDS_INFO',
+    }
+    upper = str(value).upper().strip()
+    return mapping.get(upper, upper)
+
+
 class SupabaseService:
     def __init__(self) -> None:
         if not settings.supabase_url or not settings.supabase_key:
@@ -31,7 +41,10 @@ class SupabaseService:
     async def get_candidate(self, candidate_id: str) -> dict | None:
         try:
             response = self.client.table('candidates').select('*').eq('id', candidate_id).limit(1).execute()
-            return response.data[0] if response.data else None
+            item = response.data[0] if response.data else None
+            if item:
+                item['status'] = normalize_status(item.get('status'))
+            return item
         except Exception:
             logger.exception('Failed to get candidate from Supabase')
             return None
@@ -47,7 +60,10 @@ class SupabaseService:
                 .limit(1)
                 .execute()
             )
-            return response.data[0] if response.data else None
+            item = response.data[0] if response.data else None
+            if item:
+                item['status'] = normalize_status(item.get('status'))
+            return item
         except Exception:
             logger.exception('Failed to lookup candidate by gmail_message_id')
             return None
@@ -55,10 +71,16 @@ class SupabaseService:
     async def list_candidates(self, status: str | None = None) -> list[dict]:
         try:
             query = self.client.table('candidates').select('*').order('created_at', desc=True)
-            if status:
-                query = query.eq('status', status)
             response = query.execute()
-            return response.data or []
+            rows = response.data or []
+            for row in rows:
+                row['status'] = normalize_status(row.get('status'))
+
+            normalized_filter = normalize_status(status)
+            if normalized_filter:
+                rows = [row for row in rows if normalize_status(row.get('status')) == normalized_filter]
+
+            return rows
         except Exception:
             logger.exception('Failed to list candidates from Supabase')
             return []
@@ -68,10 +90,13 @@ class SupabaseService:
             response = (
                 self.client.table('candidates')
                 .select('*')
-                .in_('status', ['QUALIFIED', 'NEEDS_MORE_INFO', 'NEW'])
+                .in_('status', ['QUALIFIED', 'NEEDS_MORE_INFO', 'NEEDS_INFO', 'NEW', 'INTERVIEW_READY'])
                 .execute()
             )
-            return response.data or []
+            rows = response.data or []
+            for row in rows:
+                row['status'] = normalize_status(row.get('status'))
+            return rows
         except Exception:
             logger.exception('Failed to list followup candidates from Supabase')
             return []
@@ -81,7 +106,10 @@ class SupabaseService:
             return None
         try:
             response = self.client.table('candidates').select('*').eq('email', email).order('created_at', desc=True).limit(1).execute()
-            return response.data[0] if response.data else None
+            item = response.data[0] if response.data else None
+            if item:
+                item['status'] = normalize_status(item.get('status'))
+            return item
         except Exception:
             logger.exception('Failed to lookup candidate by email')
             return None

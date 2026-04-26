@@ -16,6 +16,7 @@ export function FeaturePage({ title, subtitle, endpoint }: FeaturePageProps) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['resource-list', endpoint],
     queryFn: () => fetchResourceList(endpoint),
+    refetchInterval: 20000,
   })
 
   return (

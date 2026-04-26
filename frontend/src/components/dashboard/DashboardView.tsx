@@ -9,7 +9,7 @@ import { StatusFilter } from '@/components/StatusFilter'
 export function DashboardView({ candidates, status }: { candidates: Candidate[]; status: string }) {
   const qualified = candidates.filter((candidate) => candidate.status === 'QUALIFIED').length
   const rejected = candidates.filter((candidate) => candidate.status === 'REJECTED').length
-  const needsInfo = candidates.filter((candidate) => candidate.status === 'NEEDS_MORE_INFO').length
+  const needsInfo = candidates.filter((candidate) => candidate.status === 'NEEDS_INFO').length
 
   return (
     <main className="max-w-7xl mx-auto p-6 space-y-5">

@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-export type CandidateStatus = 'NEW' | 'QUALIFIED' | 'REJECTED' | 'NEEDS_MORE_INFO' | 'INTERVIEW_READY'
+export type CandidateStatus = 'NEW' | 'QUALIFIED' | 'REJECTED' | 'NEEDS_INFO' | 'INTERVIEW_READY'
 
 export type Candidate = {
   id: string

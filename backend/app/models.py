@@ -52,7 +52,7 @@ class CandidateSummary(BaseModel):
     id: str
     email: str
     name: str | None = None
-    status: Literal['NEW', 'QUALIFIED', 'REJECTED', 'NEEDS_MORE_INFO'] | None = None
+    status: Literal['NEW', 'QUALIFIED', 'REJECTED', 'NEEDS_INFO', 'INTERVIEW_READY'] | None = None
     score: int | None = None
     summary: str | None = None
 
@@ -62,7 +62,7 @@ class AIJsonResult(BaseModel):
 
 
 class CandidateStatusUpdateRequest(BaseModel):
-    status: Literal['NEW', 'QUALIFIED', 'REJECTED', 'NEEDS_MORE_INFO', 'INTERVIEW_READY']
+    status: Literal['NEW', 'QUALIFIED', 'REJECTED', 'NEEDS_INFO', 'INTERVIEW_READY']
 
 
 class PaginationQuery(BaseModel):

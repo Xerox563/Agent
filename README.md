@@ -66,7 +66,27 @@ npm run dev
 - `POST /schedule-interview`
 - `POST /followups/run`
 - `GET /candidates`
+- `GET /api/dashboard/summary`
+- `GET /api/dashboard/pipeline`
+- `GET /api/dashboard/activity`
+- `GET /api/dashboard/skills`
+- `GET /api/candidates`
+- `GET /api/candidates/:id`
+- `PATCH /api/candidates/:id/status`
+- `GET /api/emails`
+- `GET /api/analytics`
+- `GET /api/jobs`
+- `GET /api/automation`
+- `GET /api/templates`
+- `GET /api/integrations`
+- `GET /api/settings`
 - `GET /health`
+
+## n8n Sync
+
+- Import `n8n/workflow.json` in n8n.
+- Ensure backend runs on `http://localhost:8000` (workflow HTTP nodes point here).
+- Enable workflow after import so cron/webhook triggers are active.
 
 ## Notes
 

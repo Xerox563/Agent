@@ -6,7 +6,9 @@ import type { Candidate } from '@/lib/api'
 const badgeClass: Record<string, string> = {
   QUALIFIED: 'badge-success',
   REJECTED: 'badge-error',
+  NEEDS_INFO: 'badge-warning',
   NEEDS_MORE_INFO: 'badge-warning',
+  INTERVIEW_READY: 'badge-primary',
   NEW: 'badge-info',
 }
 

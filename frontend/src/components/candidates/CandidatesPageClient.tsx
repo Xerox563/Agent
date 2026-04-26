@@ -10,7 +10,7 @@ const statuses: Array<{ label: string; value: string }> = [
   { label: 'All', value: 'ALL' },
   { label: 'Qualified', value: 'QUALIFIED' },
   { label: 'Rejected', value: 'REJECTED' },
-  { label: 'Needs Info', value: 'NEEDS_MORE_INFO' },
+  { label: 'Needs Info', value: 'NEEDS_INFO' },
   { label: 'Interview Ready', value: 'INTERVIEW_READY' },
   { label: 'New', value: 'NEW' },
 ]
@@ -24,6 +24,7 @@ export function CandidatesPageClient() {
   const candidatesQuery = useQuery({
     queryKey: ['candidates', status, search, page],
     queryFn: () => fetchCandidates({ status, search, page, pageSize: 10 }),
+    refetchInterval: 15000,
   })
 
   const updateMutation = useMutation({

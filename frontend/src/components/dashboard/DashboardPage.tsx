@@ -25,12 +25,12 @@ const item = { hidden: { opacity: 0, y: 18 }, show: { opacity: 1, y: 0 } }
 
 export function DashboardPage() {
   const [mounted, setMounted] = useState(false)
-  const summaryQuery = useQuery({ queryKey: ['dashboard-summary'], queryFn: fetchDashboardSummary })
-  const pipelineQuery = useQuery({ queryKey: ['dashboard-pipeline'], queryFn: fetchDashboardPipeline })
-  const trendsQuery = useQuery({ queryKey: ['dashboard-trends'], queryFn: fetchDashboardTrends })
-  const skillsQuery = useQuery({ queryKey: ['dashboard-skills'], queryFn: fetchDashboardSkills })
-  const recentCandidatesQuery = useQuery({ queryKey: ['dashboard-recent-candidates'], queryFn: fetchDashboardRecentCandidates })
-  const activityQuery = useQuery({ queryKey: ['dashboard-activity'], queryFn: fetchDashboardActivity })
+  const summaryQuery = useQuery({ queryKey: ['dashboard-summary'], queryFn: fetchDashboardSummary, refetchInterval: 15000 })
+  const pipelineQuery = useQuery({ queryKey: ['dashboard-pipeline'], queryFn: fetchDashboardPipeline, refetchInterval: 15000 })
+  const trendsQuery = useQuery({ queryKey: ['dashboard-trends'], queryFn: fetchDashboardTrends, refetchInterval: 30000 })
+  const skillsQuery = useQuery({ queryKey: ['dashboard-skills'], queryFn: fetchDashboardSkills, refetchInterval: 30000 })
+  const recentCandidatesQuery = useQuery({ queryKey: ['dashboard-recent-candidates'], queryFn: fetchDashboardRecentCandidates, refetchInterval: 15000 })
+  const activityQuery = useQuery({ queryKey: ['dashboard-activity'], queryFn: fetchDashboardActivity, refetchInterval: 10000 })
 
   useEffect(() => {
     setMounted(true)

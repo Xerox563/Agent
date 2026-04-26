@@ -22,7 +22,7 @@ from app.models import (
 from app.services.ai_service import AIService
 from app.services.email_service import EmailService
 from app.services.parser_service import ParserService
-from app.services.supabase_service import SupabaseService
+from app.services.supabase_service import SupabaseService, normalize_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -82,10 +82,11 @@ async def run_pipeline(
 
             prompt = (
                 'Classify this candidate. Return JSON only with keys: status, score, summary. '
-                "Allowed status values: QUALIFIED, REJECTED, NEEDS_MORE_INFO. Candidate:\n\n"
+                "Allowed status values: QUALIFIED, REJECTED, NEEDS_INFO, INTERVIEW_READY. Candidate:\n\n"
                 f'{saved}'
             )
             result = await ai_service.json_completion(prompt)
+            result['status'] = normalize_status(result.get('status'))
             updated = await db.update_candidate(saved['id'], result)
             classified.append(updated)
 
@@ -161,10 +162,11 @@ async def classify_candidate(
 
     prompt = (
         'Classify this candidate. Return JSON only with keys: status, score, summary. '
-        "Allowed status values: QUALIFIED, REJECTED, NEEDS_MORE_INFO. Candidate:\n\n"
+        "Allowed status values: QUALIFIED, REJECTED, NEEDS_INFO, INTERVIEW_READY. Candidate:\n\n"
         f'{candidate}'
     )
     result = await ai_service.json_completion(prompt)
+    result['status'] = normalize_status(result.get('status'))
     updated = await db.update_candidate(payload.candidate_id, result)
     return {'candidate': updated}
 
@@ -363,7 +365,7 @@ async def run_replies(
 
 @router.get('/candidates')
 async def list_candidates(status: str | None = Query(default=None), db: SupabaseService = Depends(get_supabase_service)):
-    return {'candidates': await db.list_candidates(status=status)}
+    return {'candidates': await db.list_candidates(status=normalize_status(status))}
 
 
 @router.get('/api/candidates')
@@ -374,7 +376,8 @@ async def list_candidates_v2(
     page_size: int = Query(default=20, ge=1, le=100),
     db: SupabaseService = Depends(get_supabase_service),
 ):
-    candidates = await db.list_candidates(status=status if status and status != 'ALL' else None)
+    normalized = normalize_status(status) if status and status != 'ALL' else None
+    candidates = await db.list_candidates(status=normalized)
     if search:
         search_term = search.strip().lower()
         candidates = [
@@ -404,7 +407,10 @@ async def update_candidate_status(
     candidate = await db.get_candidate(candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail='Candidate not found')
-    updated = await db.update_candidate(candidate_id, {'status': payload.status, 'updated_at': datetime.now(timezone.utc).isoformat()})
+    updated = await db.update_candidate(
+        candidate_id,
+        {'status': normalize_status(payload.status), 'updated_at': datetime.now(timezone.utc).isoformat()},
+    )
     return {'item': updated}
 
 
@@ -414,7 +420,7 @@ async def dashboard_summary(db: SupabaseService = Depends(get_supabase_service))
     total = len(candidates)
     qualified = len([c for c in candidates if c.get('status') == 'QUALIFIED'])
     rejected = len([c for c in candidates if c.get('status') == 'REJECTED'])
-    needs_info = len([c for c in candidates if c.get('status') == 'NEEDS_MORE_INFO'])
+    needs_info = len([c for c in candidates if normalize_status(c.get('status')) == 'NEEDS_INFO'])
     interview_ready = len([c for c in candidates if c.get('status') == 'INTERVIEW_READY'])
     scored = [int(c.get('score')) for c in candidates if c.get('score') is not None]
     avg_score = round(sum(scored) / len(scored), 1) if scored else 0
@@ -456,7 +462,7 @@ async def dashboard_activity(db: SupabaseService = Depends(get_supabase_service)
     fallback = [
         {
             'id': row.get('id'),
-            'message': f"{row.get('name') or row.get('email', 'Candidate')} marked as {row.get('status', 'NEW')}",
+            'message': f"{row.get('name') or row.get('email', 'Candidate')} marked as {normalize_status(row.get('status')) or 'NEW'}",
             'created_at': row.get('updated_at') or row.get('created_at'),
         }
         for row in candidates[:10]
